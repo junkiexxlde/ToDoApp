@@ -1,0 +1,639 @@
+/*
+  Designkonzept: klares, funktionales "Werkstatt-Ledger" statt Fluent-Klon.
+  Palette: kühles Graphit-Papier, Tinten-Navy, Bauhaus-Gelb & Ziegelrot als
+  Funktionsfarben (nicht dekorativ) — Gelb = Fortschritt, Rot = Löschen,
+  Grün = erledigt. Typografie: Space Grotesk (Display) + IBM Plex Sans (Text)
+  + IBM Plex Mono (Zahlen/Meta), passend zum "Aufgaben abarbeiten"-Charakter.
+*/
+
+:root {
+    --color-bg: #E9EAE4;
+    --color-surface: #FFFFFF;
+    --color-ink: #16233F;
+    --color-ink-soft: #5B6270;
+    --color-border: #D8D9D0;
+    --color-accent: #E3A72B;
+    --color-accent-ink: #4A3410;
+    --color-danger: #B23A2E;
+    --color-danger-soft: #F5E4E1;
+    --color-success: #2F7364;
+    --color-success-soft: #E4EEE9;
+    --color-note: #FBF1D6;
+    --color-note-border: #E3A72B;
+
+    --font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
+    --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+    --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
+
+    --radius-sm: 3px;
+    --radius-md: 6px;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.001ms !important;
+        transition-duration: 0.001ms !important;
+    }
+}
+
+body {
+    font-family: var(--font-body);
+    background-color: var(--color-bg);
+    background-image:
+        linear-gradient(var(--color-border) 1px, transparent 1px);
+    background-size: 100% 32px;
+    color: var(--color-ink);
+    min-height: 100vh;
+    padding: var(--space-5) var(--space-4) var(--space-6);
+}
+
+.container {
+    max-width: 640px;
+    margin: 0 auto;
+}
+
+/* Header */
+.app-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding-bottom: var(--space-4);
+    border-bottom: 2px solid var(--color-ink);
+    margin-bottom: var(--space-3);
+}
+
+.app-header-title h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 32px;
+    letter-spacing: -0.02em;
+    color: var(--color-ink);
+    line-height: 1.1;
+}
+
+.app-header-sub {
+    font-size: 13px;
+    color: var(--color-ink-soft);
+    margin-top: var(--space-1);
+}
+
+/* Signature element: Fortschritts-Ring */
+.progress-ring {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+}
+
+.progress-ring svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.progress-ring-track {
+    fill: none;
+    stroke: var(--color-border);
+    stroke-width: 6;
+}
+
+.progress-ring-fill {
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 6;
+    stroke-linecap: round;
+    stroke-dasharray: 169.6;
+    stroke-dashoffset: 169.6;
+    transition: stroke-dashoffset 0.4s ease, stroke 0.4s ease;
+}
+
+.progress-ring-fill.complete {
+    stroke: var(--color-success);
+}
+
+.progress-ring-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-ink);
+}
+
+.task-count {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: var(--space-4);
+}
+
+/* Todo-Formular */
+#todo-form {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-5);
+}
+
+#todo-input {
+    flex: 1;
+    padding: 12px 14px;
+    font-family: var(--font-body);
+    font-size: 15px;
+    border: 2px solid var(--color-ink);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-surface);
+    outline: none;
+    transition: box-shadow 0.15s;
+}
+
+#todo-input:focus-visible {
+    box-shadow: 0 0 0 3px rgba(227, 167, 43, 0.45);
+}
+
+#todo-submit {
+    padding: 12px 22px;
+    background-color: var(--color-ink);
+    color: var(--color-bg);
+    border: 2px solid var(--color-ink);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 600;
+    transition: background-color 0.15s, color 0.15s;
+}
+
+#todo-submit:hover {
+    background-color: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-accent-ink);
+}
+
+#todo-submit:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+}
+
+/* Todo-Liste */
+#todo-list {
+    list-style: none;
+    padding: 0;
+}
+
+.empty-state {
+    text-align: center;
+    padding: var(--space-6) var(--space-4);
+    color: var(--color-ink-soft);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-md);
+}
+
+.empty-state-icon {
+    display: inline-block;
+    font-family: var(--font-display);
+    font-size: 22px;
+    color: var(--color-success);
+    border: 2px solid var(--color-success);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    line-height: 36px;
+    margin-bottom: var(--space-3);
+}
+
+.empty-state p {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--color-ink);
+}
+
+.empty-state-hint {
+    display: block;
+    font-size: 13px;
+    margin-top: var(--space-1);
+}
+
+.todo-item {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-left: 4px solid var(--color-ink);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-3);
+    overflow: hidden;
+    transition: border-left-color 0.2s, transform 0.15s;
+}
+
+.todo-item:hover {
+    transform: translateX(2px);
+}
+
+.todo-item.completed {
+    border-left-color: var(--color-success);
+    background-color: var(--color-success-soft);
+}
+
+.todo-item.completed .todo-text {
+    text-decoration: line-through;
+    color: var(--color-ink-soft);
+}
+
+.todo-header {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    cursor: default;
+}
+
+.todo-text {
+    flex: 1;
+    font-size: 15px;
+    margin: 0 var(--space-3);
+    word-break: break-word;
+}
+
+/* Eigene Checkbox-Optik */
+.todo-toggle,
+.subtask-toggle {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--color-ink);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    background-color: var(--color-surface);
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+.todo-toggle:checked,
+.subtask-toggle:checked {
+    background-color: var(--color-success);
+    border-color: var(--color-success);
+}
+
+.todo-toggle:checked::after,
+.subtask-toggle:checked::after {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 5px;
+    height: 10px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(40deg);
+}
+
+.subtask-toggle {
+    width: 16px;
+    height: 16px;
+}
+
+.subtask-toggle:checked::after {
+    left: 4px;
+    top: 0px;
+    width: 4px;
+    height: 8px;
+}
+
+/* Aktionen */
+.todo-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.subtask-toggle-btn,
+.note-toggle {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--color-ink-soft);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.subtask-toggle-btn:hover,
+.note-toggle:hover {
+    background-color: var(--color-bg);
+    border-color: var(--color-border);
+    color: var(--color-ink);
+}
+
+.todo-delete {
+    background-color: transparent;
+    color: var(--color-danger);
+    border: 1px solid transparent;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+.todo-delete:hover {
+    background-color: var(--color-danger-soft);
+    border-color: var(--color-danger);
+}
+
+/* Notiz */
+.todo-note {
+    padding: var(--space-3) 16px;
+    background-color: var(--color-note);
+    border-top: 1px solid var(--color-note-border);
+}
+
+.todo-note textarea {
+    width: 100%;
+    padding: var(--space-2);
+    border: 1px solid var(--color-note-border);
+    border-radius: var(--radius-sm);
+    resize: vertical;
+    min-height: 72px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    margin-bottom: var(--space-2);
+    outline: none;
+    background-color: var(--color-surface);
+}
+
+.note-save {
+    padding: 8px 16px;
+    background-color: var(--color-ink);
+    color: var(--color-bg);
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 600;
+    transition: background-color 0.15s;
+}
+
+.note-save:hover {
+    background-color: var(--color-accent);
+    color: var(--color-accent-ink);
+}
+
+/* Teilschritte */
+.subtask-container {
+    padding: var(--space-2) 16px var(--space-3) 40px;
+    background-color: var(--color-bg);
+    border-top: 1px solid var(--color-border);
+    display: none;
+    position: relative;
+}
+
+.subtask-container.visible {
+    display: block;
+}
+
+.subtask-container::before {
+    content: "";
+    position: absolute;
+    left: 24px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background-color: var(--color-border);
+}
+
+.subtask-item-in-todo {
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 14px;
+}
+
+.subtask-item-in-todo .subtask-toggle {
+    margin-right: var(--space-2);
+}
+
+.subtask-item-in-todo .subtask-text {
+    flex: 1;
+    margin-right: var(--space-2);
+    word-break: break-word;
+}
+
+.add-subtask-in-todo {
+    display: flex;
+    align-items: center;
+    margin-top: var(--space-2);
+    padding: var(--space-1) 0;
+}
+
+.add-subtask-in-todo input {
+    flex: 1;
+    padding: 6px 8px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    margin-right: var(--space-2);
+    outline: none;
+    background-color: var(--color-surface);
+    transition: border-color 0.15s;
+}
+
+.add-subtask-in-todo input:focus-visible {
+    border-color: var(--color-ink);
+}
+
+.add-subtask-in-todo button {
+    background: var(--color-ink);
+    color: var(--color-bg);
+    border: none;
+    border-radius: var(--radius-sm);
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    transition: background-color 0.15s;
+}
+
+.add-subtask-in-todo button:hover {
+    background-color: var(--color-accent);
+    color: var(--color-accent-ink);
+}
+
+/* Settings-Menü */
+#settings-btn {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: var(--color-ink);
+    color: var(--color-bg);
+    border: none;
+    border-radius: 50%;
+    width: 42px;
+    height: 42px;
+    cursor: pointer;
+    z-index: 999;
+    font-size: 18px;
+    box-shadow: 0 2px 6px rgba(22, 35, 63, 0.3);
+    transition: background-color 0.15s;
+}
+
+#settings-btn:hover {
+    background-color: var(--color-accent);
+}
+
+#settings-menu {
+    display: none;
+    position: fixed;
+    top: 72px;
+    right: 20px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    box-shadow: 0 6px 20px rgba(22, 35, 63, 0.15);
+    z-index: 1000;
+    min-width: 210px;
+}
+
+#settings-menu h3 {
+    font-family: var(--font-display);
+    margin-bottom: var(--space-3);
+    color: var(--color-ink);
+    font-size: 15px;
+}
+
+#backup-todos-btn {
+    background: var(--color-ink);
+    color: var(--color-bg);
+    border: none;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    margin-bottom: var(--space-2);
+    width: 100%;
+    font-family: var(--font-body);
+    font-weight: 500;
+    transition: background-color 0.15s;
+}
+
+#backup-todos-btn:hover {
+    background-color: var(--color-accent);
+    color: var(--color-accent-ink);
+}
+
+#backup-todos-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#close-settings-btn {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    width: 100%;
+    font-family: var(--font-body);
+    transition: background-color 0.15s;
+}
+
+#close-settings-btn:hover {
+    background-color: var(--color-bg);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .app-header-title h1 {
+        font-size: 26px;
+    }
+
+    .todo-header {
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    .todo-text {
+        width: 100%;
+        margin: var(--space-2) 0;
+    }
+
+    .todo-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    #todo-form {
+        flex-direction: column;
+    }
+
+    #settings-menu {
+        right: 10px;
+        top: 62px;
+    }
+
+    .subtask-container {
+        padding-left: 28px;
+    }
+}
+
+@media (max-width: 480px) {
+    body {
+        padding: var(--space-4) 12px var(--space-6);
+    }
+
+    .app-header {
+        flex-direction: row;
+        align-items: center;
+    }
+
+    .app-header-title h1 {
+        font-size: 22px;
+    }
+
+    .progress-ring {
+        width: 44px;
+        height: 44px;
+    }
+
+    .progress-ring-label {
+        font-size: 10px;
+    }
+
+    .todo-header {
+        padding: 10px 12px;
+    }
+
+    .todo-note {
+        padding: 10px 12px;
+    }
+
+    .subtask-container {
+        padding: var(--space-2) 12px var(--space-3) 24px;
+    }
+}

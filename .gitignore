@@ -1,0 +1,13 @@
+node_modules/
+npm-debug.log*
+todos.db
+backups/
+certbot/conf/
+certbot/www/
+.env
+.DS_Store
+*.log
+.vscode/
+.idea/
+dist/
+build/

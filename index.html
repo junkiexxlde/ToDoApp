@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Aufgaben</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#007AFF">
+    <link rel="icon" type="image/png" href="/icon-192.png">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+</head>
+<body>
+    <div class="container">
+        <header class="app-header">
+            <div class="app-header-title">
+                <h1>Aufgaben</h1>
+                <p class="app-header-sub">Behalte den Überblick, ein Schritt nach dem anderen</p>
+            </div>
+            <div class="progress-ring" id="progress-ring" aria-hidden="true">
+                <svg viewBox="0 0 64 64">
+                    <circle class="progress-ring-track" cx="32" cy="32" r="27"></circle>
+                    <circle class="progress-ring-fill" id="progress-ring-fill" cx="32" cy="32" r="27"></circle>
+                </svg>
+                <span class="progress-ring-label" id="progress-ring-label">0%</span>
+            </div>
+        </header>
+
+        <p class="task-count" id="task-count"></p>
+
+        <form id="todo-form">
+            <input type="text" id="todo-input" placeholder="Neues Todo hinzufügen …" required autocomplete="off">
+            <button type="submit" id="todo-submit">Hinzufügen</button>
+        </form>
+        <ul id="todo-list"></ul>
+    </div>
+
+    <!-- Settings-Menü -->
+    <div id="settings-menu">
+        <h3>Einstellungen</h3>
+        <button id="backup-todos-btn">Backup Todos</button>
+        <button id="close-settings-btn">Schließen</button>
+    </div>
+    <!-- Settings-Button -->
+    <button id="settings-btn">⚙️</button>
+
+    <script src="script.js"></script>
+</body>
+</html>
