@@ -1,19 +1,38 @@
 // index.js - Backend mit SQLite, Backup-Funktion und korrigierten Routen
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
+const multer = require('multer');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Pfade relativ zum Skriptstandort (index.js liegt in /ToDoApp/)
-const DB_PATH = path.join(__dirname, 'todos.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'todos.db');
 const BACKUP_DIR = path.join(__dirname, 'backups');
+const ATTACHMENTS_DIR = path.join(__dirname, 'attachments');
+const MAX_ATTACHMENT_SIZE = 12 * 1024 * 1024;
 
 // Backup-Verzeichnis erstellen, falls nicht vorhanden
 if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
+if (!fs.existsSync(ATTACHMENTS_DIR)) {
+    fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+}
+
+const attachmentStorage = multer.diskStorage({
+    destination: ATTACHMENTS_DIR,
+    filename: (req, file, callback) => {
+        const extension = path.extname(file.originalname).toLowerCase();
+        callback(null, `${crypto.randomUUID()}${extension}`);
+    }
+});
+const uploadAttachment = multer({
+    storage: attachmentStorage,
+    limits: { fileSize: MAX_ATTACHMENT_SIZE }
+});
 
 // Middleware
 app.use(express.json());
@@ -26,6 +45,23 @@ let db = new sqlite3.Database(DB_PATH, (err) => {
         return;
     }
     console.log('Verbunden mit der SQLite-Datenbank.');
+
+    db.run(`
+        CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            todo_id INTEGER NOT NULL,
+            original_name TEXT NOT NULL,
+            stored_name TEXT NOT NULL UNIQUE,
+            mime_type TEXT DEFAULT 'application/octet-stream',
+            size INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (todo_id) REFERENCES todos(id) ON DELETE CASCADE
+        )
+    `, (tableErr) => {
+        if (tableErr) {
+            console.error('Fehler beim Erstellen der Anhang-Tabelle:', tableErr.message);
+        }
+    });
 
     // Prüfe, ob die Tabelle existiert
     db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='todos'", (err, row) => {
@@ -42,7 +78,8 @@ let db = new sqlite3.Database(DB_PATH, (err) => {
                     text TEXT NOT NULL,
                     completed BOOLEAN DEFAULT 0,
                     note TEXT DEFAULT '',
-                    subtasks TEXT DEFAULT '[]'
+                    subtasks TEXT DEFAULT '[]',
+                    position INTEGER NOT NULL DEFAULT 0
                 )
             `, (err) => {
                 if (err) {
@@ -52,7 +89,7 @@ let db = new sqlite3.Database(DB_PATH, (err) => {
                 }
             });
         } else {
-            // Tabelle existiert → prüfe, ob 'subtasks' Spalte existiert
+            // Tabelle existiert → prüfe, ob benötigte Spalten existieren
             db.all("PRAGMA table_info(todos)", (err, rows) => {
                 if (err) {
                     console.error('Fehler beim Prüfen der Spalten:', err.message);
@@ -68,6 +105,20 @@ let db = new sqlite3.Database(DB_PATH, (err) => {
                             console.log('Spalte subtasks hinzugefügt.');
                         }
                     });
+                }
+
+                if (!columns.includes('position')) {
+                    db.run("ALTER TABLE todos ADD COLUMN position INTEGER NOT NULL DEFAULT 0", (err) => {
+                        if (err) {
+                            console.error('Fehler beim Hinzufügen der Spalte position:', err.message);
+                            return;
+                        }
+                        db.run('UPDATE todos SET position = id WHERE position = 0', (updateErr) => {
+                            if (updateErr) {
+                                console.error('Fehler beim Initialisieren der Todo-Reihenfolge:', updateErr.message);
+                            }
+                        });
+                    });
                 } else {
                     console.log('Tabelle todos ist aktuell.');
                 }
@@ -75,6 +126,36 @@ let db = new sqlite3.Database(DB_PATH, (err) => {
         }
     });
 });
+
+function addAttachmentsToTodos(todos, callback) {
+    if (todos.length === 0) {
+        callback([]);
+        return;
+    }
+
+    db.all(
+        'SELECT id, todo_id, original_name, mime_type, size, created_at FROM attachments WHERE todo_id IN (' + todos.map(() => '?').join(',') + ') ORDER BY created_at ASC, id ASC',
+        todos.map(todo => todo.id),
+        (err, attachments) => {
+            if (err) {
+                callback(null, err);
+                return;
+            }
+            const attachmentsByTodo = new Map(todos.map(todo => [todo.id, []]));
+            attachments.forEach(attachment => {
+                attachmentsByTodo.get(attachment.todo_id).push(attachment);
+            });
+            callback(todos.map(todo => ({
+                ...todo,
+                attachments: attachmentsByTodo.get(todo.id)
+            })));
+        }
+    );
+}
+
+function addAttachmentsToTodo(todo, callback) {
+    addAttachmentsToTodos([todo], (todos, err) => callback(todos ? todos[0] : null, err));
+}
 
 // Backup-Funktion
 function createBackup() {
@@ -157,7 +238,7 @@ app.get('/', (req, res) => {
 
 // Alle Todos abrufen
 app.get('/todos', (req, res) => {
-    db.all('SELECT * FROM todos', [], (err, rows) => {
+    db.all('SELECT * FROM todos ORDER BY position ASC, id ASC', [], (err, rows) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
@@ -166,7 +247,39 @@ app.get('/todos', (req, res) => {
             ...row,
             subtasks: JSON.parse(row.subtasks || '[]')
         }));
-        res.json(todos);
+        addAttachmentsToTodos(todos, (todosWithAttachments, attachmentErr) => {
+            if (attachmentErr) {
+                return res.status(500).json({ error: attachmentErr.message });
+            }
+            res.json(todosWithAttachments);
+        });
+    });
+});
+
+// Reihenfolge der Todos speichern
+app.put('/todos/reorder', (req, res) => {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.some(id => !Number.isInteger(Number(id)))) {
+        return res.status(400).json({ error: 'Eine gültige Todo-Reihenfolge ist erforderlich.' });
+    }
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        const statement = db.prepare('UPDATE todos SET position = ? WHERE id = ?');
+        ids.forEach((id, position) => statement.run(position, Number(id)));
+        statement.finalize((err) => {
+            if (err) {
+                db.run('ROLLBACK');
+                return res.status(500).json({ error: err.message });
+            }
+            db.run('COMMIT', (commitErr) => {
+                if (commitErr) {
+                    return res.status(500).json({ error: commitErr.message });
+                }
+                res.json({ message: 'Todo-Reihenfolge gespeichert.' });
+            });
+        });
     });
 });
 
@@ -180,11 +293,103 @@ app.get('/todos/:id', (req, res) => {
         if (!row) {
             return res.status(404).json({ error: 'Todo nicht gefunden' });
         }
-        res.json({
+        addAttachmentsToTodo({
             ...row,
             subtasks: JSON.parse(row.subtasks || '[]')
+        }, (todo, attachmentErr) => {
+            if (attachmentErr) {
+                return res.status(500).json({ error: attachmentErr.message });
+            }
+            res.json(todo);
         });
     });
+});
+
+// Anhang eines Todos herunterladen
+app.get('/todos/:id/attachments/:attachmentId', (req, res) => {
+    db.get(
+        'SELECT * FROM attachments WHERE id = ? AND todo_id = ?',
+        [req.params.attachmentId, req.params.id],
+        (err, attachment) => {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+            if (!attachment) {
+                return res.status(404).json({ error: 'Anhang nicht gefunden' });
+            }
+            const filePath = path.join(ATTACHMENTS_DIR, attachment.stored_name);
+            if (!fs.existsSync(filePath)) {
+                return res.status(404).json({ error: 'Anhang-Datei nicht gefunden' });
+            }
+            res.download(filePath, attachment.original_name);
+        }
+    );
+});
+
+// Anhang an ein Todo anhängen
+app.post('/todos/:id/attachments', (req, res) => {
+    uploadAttachment.single('attachment')(req, res, (uploadErr) => {
+        if (uploadErr) {
+            if (uploadErr instanceof multer.MulterError && uploadErr.code === 'LIMIT_FILE_SIZE') {
+                return res.status(413).json({ error: 'Anhänge dürfen höchstens 12 MB groß sein.' });
+            }
+            return res.status(400).json({ error: 'Anhang konnte nicht verarbeitet werden.' });
+        }
+        if (!req.file) {
+            return res.status(400).json({ error: 'Keine Datei ausgewählt.' });
+        }
+
+        db.get('SELECT id FROM todos WHERE id = ?', [req.params.id], (todoErr, todo) => {
+            if (todoErr || !todo) {
+                fs.unlink(req.file.path, () => {});
+                return res.status(todoErr ? 500 : 404).json({ error: todoErr ? todoErr.message : 'Todo nicht gefunden' });
+            }
+            db.run(
+                'INSERT INTO attachments (todo_id, original_name, stored_name, mime_type, size) VALUES (?, ?, ?, ?, ?)',
+                [req.params.id, req.file.originalname, req.file.filename, req.file.mimetype, req.file.size],
+                function (insertErr) {
+                    if (insertErr) {
+                        fs.unlink(req.file.path, () => {});
+                        return res.status(500).json({ error: insertErr.message });
+                    }
+                    res.status(201).json({
+                        id: this.lastID,
+                        todo_id: Number(req.params.id),
+                        original_name: req.file.originalname,
+                        mime_type: req.file.mimetype,
+                        size: req.file.size
+                    });
+                }
+            );
+        });
+    });
+});
+
+// Anhang eines Todos löschen
+app.delete('/todos/:id/attachments/:attachmentId', (req, res) => {
+    db.get(
+        'SELECT stored_name FROM attachments WHERE id = ? AND todo_id = ?',
+        [req.params.attachmentId, req.params.id],
+        (findErr, attachment) => {
+            if (findErr) {
+                return res.status(500).json({ error: findErr.message });
+            }
+            if (!attachment) {
+                return res.status(404).json({ error: 'Anhang nicht gefunden' });
+            }
+            db.run('DELETE FROM attachments WHERE id = ? AND todo_id = ?', [req.params.attachmentId, req.params.id], (deleteErr) => {
+                if (deleteErr) {
+                    return res.status(500).json({ error: deleteErr.message });
+                }
+                fs.unlink(path.join(ATTACHMENTS_DIR, attachment.stored_name), (unlinkErr) => {
+                    if (unlinkErr && unlinkErr.code !== 'ENOENT') {
+                        console.error('Fehler beim Löschen der Anhang-Datei:', unlinkErr.message);
+                    }
+                    res.status(204).end();
+                });
+            });
+        }
+    );
 });
 
 // Neues Todo hinzufügen
@@ -193,16 +398,21 @@ app.post('/todos', (req, res) => {
     if (!text) {
         return res.status(400).json({ error: 'Text ist erforderlich' });
     }
-    db.run(
-        'INSERT INTO todos (text, completed, note, subtasks) VALUES (?, 0, ?, ?)',
-        [text, note, JSON.stringify(subtasks)],
-        function (err) {
-            if (err) {
-                return res.status(500).json({ error: err.message });
-            }
-            res.status(201).json({ id: this.lastID, text, completed: false, note, subtasks });
+    db.get('SELECT COALESCE(MAX(position), -1) + 1 AS position FROM todos', (positionErr, row) => {
+        if (positionErr) {
+            return res.status(500).json({ error: positionErr.message });
         }
-    );
+        db.run(
+            'INSERT INTO todos (text, completed, note, subtasks, position) VALUES (?, 0, ?, ?, ?)',
+            [text, note, JSON.stringify(subtasks), row.position],
+            function (err) {
+                if (err) {
+                    return res.status(500).json({ error: err.message });
+                }
+                res.status(201).json({ id: this.lastID, text, completed: false, note, subtasks, position: row.position });
+            }
+        );
+    });
 });
 
 // Todo aktualisieren (erledigt/Notiz/Subtasks)
@@ -275,14 +485,27 @@ app.put('/todos/:id', (req, res) => {
 // Todo löschen
 app.delete('/todos/:id', (req, res) => {
     const { id } = req.params;
-    db.run('DELETE FROM todos WHERE id = ?', [id], function (err) {
-        if (err) {
-            return res.status(500).json({ error: err.message });
+    db.all('SELECT stored_name FROM attachments WHERE todo_id = ?', [id], (attachmentErr, attachments) => {
+        if (attachmentErr) {
+            return res.status(500).json({ error: attachmentErr.message });
         }
-        if (this.changes === 0) {
-            return res.status(404).json({ error: 'Todo nicht gefunden' });
-        }
-        res.status(204).end();
+        db.run('DELETE FROM attachments WHERE todo_id = ?', [id], (deleteAttachmentsErr) => {
+            if (deleteAttachmentsErr) {
+                return res.status(500).json({ error: deleteAttachmentsErr.message });
+            }
+            db.run('DELETE FROM todos WHERE id = ?', [id], function (err) {
+                if (err) {
+                    return res.status(500).json({ error: err.message });
+                }
+                if (this.changes === 0) {
+                    return res.status(404).json({ error: 'Todo nicht gefunden' });
+                }
+                attachments.forEach(attachment => {
+                    fs.unlink(path.join(ATTACHMENTS_DIR, attachment.stored_name), () => {});
+                });
+                res.status(204).end();
+            });
+        });
     });
 });
 

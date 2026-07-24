@@ -7,6 +7,7 @@ A feature-rich todo application with offline support, built with Node.js, Expres
 ✅ Add, edit, and delete todos  
 ✅ Subtasks/Checklists  
 ✅ Notes for each todo  
+✅ File attachments on notes (up to 12 MB per file)
 ✅ Progress tracking with visual ring  
 ✅ Automatic backups  
 ✅ Offline support (PWA)  
@@ -78,6 +79,9 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for full instructions.
 |--------|----------|-------------|
 | GET | `/todos` | Get all todos |
 | GET | `/todos/:id` | Get single todo |
+| POST | `/todos/:id/attachments` | Add an attachment (up to 12 MB) |
+| GET | `/todos/:id/attachments/:attachmentId` | Download an attachment |
+| DELETE | `/todos/:id/attachments/:attachmentId` | Delete an attachment |
 | POST | `/todos` | Create todo |
 | PUT | `/todos/:id` | Update todo |
 | DELETE | `/todos/:id` | Delete todo |
@@ -100,6 +104,7 @@ ToDoApp/
 ├── init-letsencrypt.sh   # SSL certificate setup
 ├── todos.db              # SQLite database
 ├── backups/              # Automatic backups
+├── attachments/          # Files attached to todo notes
 └── DEPLOYMENT.md         # Deployment guide
 ```
 

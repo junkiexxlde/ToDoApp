@@ -29,7 +29,12 @@
             </div>
         </header>
 
-        <p class="task-count" id="task-count"></p>
+        <div class="task-filter" id="task-filter" aria-label="Todo-Filter">
+            <button type="button" class="task-filter-btn active" data-filter="all">Alle <span id="all-count">0</span></button>
+            <button type="button" class="task-filter-btn" data-filter="open">Offen <span id="open-count">0</span></button>
+            <button type="button" class="task-filter-btn" data-filter="completed">Erledigt <span id="completed-count">0</span></button>
+            <button type="button" id="delete-completed-btn" class="delete-completed-btn" hidden>Erledigte löschen</button>
+        </div>
 
         <form id="todo-form">
             <input type="text" id="todo-input" placeholder="Neues Todo hinzufügen …" required autocomplete="off">
@@ -39,9 +44,14 @@
     </div>
 
     <!-- Settings-Menü -->
-    <div id="settings-menu">
+    <div id="settings-menu" hidden>
         <h3>Einstellungen</h3>
         <button id="backup-todos-btn">Backup Todos</button>
+        <label for="backup-select">Backup auswählen</label>
+        <select id="backup-select" disabled>
+            <option value="">Keine Backups gefunden</option>
+        </select>
+        <button id="restore-todos-btn" disabled>Todos wiederherstellen</button>
         <button id="close-settings-btn">Schließen</button>
     </div>
     <!-- Settings-Button -->

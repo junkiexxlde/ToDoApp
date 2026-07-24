@@ -9,6 +9,7 @@ services:
     volumes:
       - ./todos.db:/app/todos.db
       - ./backups:/app/backups
+      - ./attachments:/app/attachments
     restart: unless-stopped
     networks:
       - todoapp-network

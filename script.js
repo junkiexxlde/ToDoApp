@@ -15,19 +15,26 @@ const todoList = document.getElementById('todo-list');
 const settingsBtn = document.getElementById('settings-btn');
 const settingsMenu = document.getElementById('settings-menu');
 const backupTodosBtn = document.getElementById('backup-todos-btn');
+const backupSelect = document.getElementById('backup-select');
+const restoreTodosBtn = document.getElementById('restore-todos-btn');
 const closeSettingsBtn = document.getElementById('close-settings-btn');
+const taskFilter = document.getElementById('task-filter');
+const deleteCompletedBtn = document.getElementById('delete-completed-btn');
 
 const expandedSubtaskTodoIds = new Set();
+let draggedTodoId = null;
+let currentFilter = 'all';
 
 // Settings-Menü ein-/ausblenden
 settingsBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    settingsMenu.style.display = settingsMenu.style.display === 'none' ? 'block' : 'none';
+    settingsMenu.hidden = !settingsMenu.hidden;
+    if (!settingsMenu.hidden) loadBackups();
 });
 
 closeSettingsBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    settingsMenu.style.display = 'none';
+    settingsMenu.hidden = true;
 });
 
 // Neues Todo hinzufügen
@@ -69,6 +76,18 @@ async function addTodo(e) {
 // Form-Submit-Handler
 todoForm.addEventListener('submit', addTodo);
 
+taskFilter.addEventListener('click', (e) => {
+    const filterButton = e.target.closest('.task-filter-btn');
+    if (!filterButton) return;
+    currentFilter = filterButton.dataset.filter;
+    document.querySelectorAll('.task-filter-btn').forEach(button => {
+        button.classList.toggle('active', button === filterButton);
+    });
+    loadTodos();
+});
+
+deleteCompletedBtn.addEventListener('click', deleteCompletedTodos);
+
 // Backup Todos auslösen
 backupTodosBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -80,10 +99,66 @@ backupTodosBtn.addEventListener('click', async (e) => {
         const response = await fetch('/backup', { method: 'GET' });
         const data = await response.json();
         alert(`Backup erfolgreich erstellt!\nDateiname: ${data.filename}`);
+        await loadBackups();
     } catch (error) {
         alert('Fehler beim Erstellen des Backups: ' + error.message);
     } finally {
         backupTodosBtn.disabled = false;
+    }
+});
+
+async function loadBackups() {
+    try {
+        const response = await fetch('/backups');
+        if (!response.ok) throw new Error('Backups konnten nicht geladen werden.');
+        const data = await response.json();
+        const backups = data.backups || [];
+
+        backupSelect.replaceChildren();
+        backups.forEach(filename => {
+            const option = document.createElement('option');
+            option.value = filename;
+            option.textContent = filename;
+            backupSelect.appendChild(option);
+        });
+        backupSelect.disabled = backups.length === 0;
+        restoreTodosBtn.disabled = backups.length === 0;
+
+        if (backups.length === 0) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'Keine Backups gefunden';
+            backupSelect.appendChild(option);
+        }
+    } catch (error) {
+        backupSelect.replaceChildren(new Option('Backups konnten nicht geladen werden', ''));
+        backupSelect.disabled = true;
+        restoreTodosBtn.disabled = true;
+        alert('Fehler beim Laden der Backups: ' + error.message);
+    }
+}
+
+restoreTodosBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const filename = backupSelect.value;
+    if (!filename || !confirm(`Möchtest du das Backup "${filename}" wirklich wiederherstellen? Die aktuellen Todos werden ersetzt.`)) return;
+
+    restoreTodosBtn.disabled = true;
+    try {
+        const response = await fetch('/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Wiederherstellung fehlgeschlagen.');
+        alert('Todos wurden erfolgreich wiederhergestellt.');
+        settingsMenu.hidden = true;
+        await loadTodos();
+    } catch (error) {
+        alert('Fehler beim Wiederherstellen der Todos: ' + error.message);
+        restoreTodosBtn.disabled = false;
     }
 });
 
@@ -105,14 +180,15 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+function formatFileSize(size) {
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 // Fortschritts-Ring und Zähler aktualisieren
 function updateProgress(todos) {
     const total = todos.length;
-    const completedCount = todos.filter(todo => {
-        const hasSubtasks = todo.subtasks && todo.subtasks.length > 0;
-        const allSubtasksCompleted = hasSubtasks && todo.subtasks.every(st => st.completed);
-        return todo.completed || allSubtasksCompleted;
-    }).length;
+    const completedCount = todos.filter(isTodoCompleted).length;
     const percent = total === 0 ? 0 : Math.round((completedCount / total) * 100);
 
     const circumference = 169.6;
@@ -122,43 +198,58 @@ function updateProgress(todos) {
     ringFill.classList.toggle('complete', total > 0 && percent === 100);
     ringLabel.textContent = `${percent}%`;
 
-    const taskCount = document.getElementById('task-count');
-    taskCount.textContent = total === 0
-        ? ''
-        : `${total - completedCount} offen · ${completedCount} erledigt`;
+    document.getElementById('all-count').textContent = total;
+    document.getElementById('open-count').textContent = total - completedCount;
+    document.getElementById('completed-count').textContent = completedCount;
+    deleteCompletedBtn.hidden = currentFilter !== 'completed' || completedCount === 0;
+}
+
+function isTodoCompleted(todo) {
+    const hasSubtasks = todo.subtasks && todo.subtasks.length > 0;
+    const allSubtasksCompleted = hasSubtasks && todo.subtasks.every(st => st.completed);
+    return todo.completed || allSubtasksCompleted;
+}
+
+function getFilteredTodos(todos) {
+    if (currentFilter === 'open') return todos.filter(todo => !isTodoCompleted(todo));
+    if (currentFilter === 'completed') return todos.filter(isTodoCompleted);
+    return todos;
 }
 
 // Todos rendern (mit Teilschritten direkt unter dem Todo)
 function renderTodos(todos) {
     todoList.innerHTML = '';
     updateProgress(todos);
+    const filteredTodos = getFilteredTodos(todos);
 
-    if (todos.length === 0) {
+    if (filteredTodos.length === 0) {
         todoList.innerHTML = `
             <li class="empty-state">
                 <span class="empty-state-icon">✓</span>
-                <p>Keine Todos vorhanden</p>
-                <span class="empty-state-hint">Füge oben dein erstes Todo hinzu</span>
+                <p>${todos.length === 0 ? 'Keine Todos vorhanden' : 'Keine passenden Todos'}</p>
+                <span class="empty-state-hint">${todos.length === 0 ? 'Füge oben dein erstes Todo hinzu' : 'Wähle einen anderen Filter'}</span>
             </li>
         `;
         return;
     }
 
-    todos.forEach(todo => {
+    filteredTodos.forEach(todo => {
         const todoItem = document.createElement('li');
         const hasSubtasks = todo.subtasks && todo.subtasks.length > 0;
         const allSubtasksCompleted = hasSubtasks && todo.subtasks.every(st => st.completed);
-        const isCompleted = todo.completed || allSubtasksCompleted;
+        const isCompleted = isTodoCompleted(todo);
         const isSubtaskContainerVisible = expandedSubtaskTodoIds.has(todo.id);
 
         todoItem.className = `todo-item ${isCompleted ? 'completed' : ''} ${hasSubtasks ? 'has-subtasks' : ''}`;
         todoItem.dataset.id = todo.id;
+        todoItem.draggable = true;
 
         const noteId = `note-${todo.id}`;
         const noteDisplayId = `note-display-${todo.id}`;
         const subtaskContainerId = `subtask-container-${todo.id}`;
         const newSubtaskInputId = `new-subtask-input-${todo.id}`;
-        const noteButtonText = todo.note ? 'Notiz ausblenden' : 'Notiz einblenden';
+        const noteButtonText = 'Notiz einblenden';
+        const attachments = todo.attachments || [];
 
         todoItem.innerHTML = `
             <div class="todo-header">
@@ -172,9 +263,25 @@ function renderTodos(todos) {
                     <button class="todo-delete" data-id="${todo.id}">Löschen</button>
                 </div>
             </div>
-            <div id="${noteId}" class="todo-note" ${todo.note ? '' : 'style="display: none;"'}>
+            <div id="${noteId}" class="todo-note" style="display: none;">
                 <textarea id="${noteDisplayId}" placeholder="Notiz eingeben...">${escapeHtml(todo.note || '')}</textarea>
                 <button class="note-save" data-id="${todo.id}" data-note-id="${noteDisplayId}">Speichern</button>
+                <div class="todo-attachments">
+                    <div class="attachment-list">
+                        ${attachments.map(attachment => `
+                            <div class="attachment-item">
+                                <a href="${API_URL}/${todo.id}/attachments/${attachment.id}" class="attachment-link" download>${escapeHtml(attachment.original_name)}</a>
+                                <span class="attachment-size">${formatFileSize(attachment.size)}</span>
+                                <button class="attachment-delete" data-todo-id="${todo.id}" data-attachment-id="${attachment.id}" title="Anhang löschen" aria-label="Anhang löschen">×</button>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <label class="attachment-upload">
+                        <span>Anhang hinzufügen</span>
+                        <input type="file" class="note-attachment-input" data-todo-id="${todo.id}" multiple>
+                    </label>
+                    <span class="attachment-hint">Maximal 12 MB pro Datei</span>
+                </div>
             </div>
             <div id="${subtaskContainerId}" class="subtask-container ${isSubtaskContainerVisible ? 'visible' : ''}">
                 ${hasSubtasks ? todo.subtasks.map((subtask, index) => `
@@ -192,6 +299,14 @@ function renderTodos(todos) {
         todoList.appendChild(todoItem);
     });
 
+    document.querySelectorAll('.todo-item').forEach(todoItem => {
+        todoItem.addEventListener('dragstart', handleTodoDragStart);
+        todoItem.addEventListener('dragover', handleTodoDragOver);
+        todoItem.addEventListener('dragleave', handleTodoDragLeave);
+        todoItem.addEventListener('drop', handleTodoDrop);
+        todoItem.addEventListener('dragend', handleTodoDragEnd);
+    });
+
     // Event-Listener hinzufügen
     document.querySelectorAll('.todo-toggle').forEach(checkbox => {
         checkbox.addEventListener('change', toggleTodo);
@@ -204,6 +319,12 @@ function renderTodos(todos) {
     });
     document.querySelectorAll('.note-save').forEach(button => {
         button.addEventListener('click', saveNote);
+    });
+    document.querySelectorAll('.note-attachment-input').forEach(input => {
+        input.addEventListener('change', uploadAttachments);
+    });
+    document.querySelectorAll('.attachment-delete').forEach(button => {
+        button.addEventListener('click', deleteAttachment);
     });
     document.querySelectorAll('.subtask-toggle-btn').forEach(button => {
         button.addEventListener('click', toggleSubtaskContainer);
@@ -221,6 +342,105 @@ function renderTodos(todos) {
                 document.querySelector(`.add-subtask-btn[data-todo-id="${todoId}"]`).click();
             }
         });
+    });
+}
+
+async function uploadAttachments(e) {
+    e.stopPropagation();
+    const input = e.target;
+    const todoId = input.getAttribute('data-todo-id');
+    const maxSize = 12 * 1024 * 1024;
+    const files = [...input.files];
+
+    for (const file of files) {
+        if (file.size > maxSize) {
+            alert(`Die Datei "${file.name}" ist größer als 12 MB.`);
+            continue;
+        }
+        const formData = new FormData();
+        formData.append('attachment', file);
+        try {
+            const response = await fetch(`${API_URL}/${todoId}/attachments`, {
+                method: 'POST',
+                body: formData
+            });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || 'Fehler beim Hochladen des Anhangs');
+            }
+        } catch (error) {
+            alert(`Fehler beim Hochladen von "${file.name}": ${error.message}`);
+        }
+    }
+    input.value = '';
+    loadTodos();
+}
+
+async function deleteAttachment(e) {
+    e.stopPropagation();
+    const todoId = e.currentTarget.getAttribute('data-todo-id');
+    const attachmentId = e.currentTarget.getAttribute('data-attachment-id');
+    try {
+        const response = await fetch(`${API_URL}/${todoId}/attachments/${attachmentId}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Fehler beim Löschen des Anhangs');
+        loadTodos();
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+function handleTodoDragStart(e) {
+    draggedTodoId = e.currentTarget.dataset.id;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', draggedTodoId);
+    e.currentTarget.classList.add('dragging');
+}
+
+function handleTodoDragOver(e) {
+    e.preventDefault();
+    if (e.currentTarget.dataset.id !== draggedTodoId) {
+        e.dataTransfer.dropEffect = 'move';
+        e.currentTarget.classList.add('drag-over');
+    }
+}
+
+function handleTodoDragLeave(e) {
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+        e.currentTarget.classList.remove('drag-over');
+    }
+}
+
+async function handleTodoDrop(e) {
+    e.preventDefault();
+    const targetTodo = e.currentTarget;
+    const targetTodoId = targetTodo.dataset.id;
+    targetTodo.classList.remove('drag-over');
+
+    if (!draggedTodoId || draggedTodoId === targetTodoId) return;
+
+    const draggedTodo = document.querySelector(`.todo-item[data-id="${draggedTodoId}"]`);
+    const targetRect = targetTodo.getBoundingClientRect();
+    const insertBefore = e.clientY < targetRect.top + targetRect.height / 2;
+    todoList.insertBefore(draggedTodo, insertBefore ? targetTodo : targetTodo.nextSibling);
+
+    try {
+        const ids = [...todoList.querySelectorAll('.todo-item')].map(item => Number(item.dataset.id));
+        const response = await fetch(`${API_URL}/reorder`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids })
+        });
+        if (!response.ok) throw new Error('Fehler beim Speichern der Reihenfolge');
+    } catch (error) {
+        console.error('Fehler beim Sortieren der Todos:', error);
+        loadTodos();
+    }
+}
+
+function handleTodoDragEnd() {
+    draggedTodoId = null;
+    document.querySelectorAll('.todo-item').forEach(todoItem => {
+        todoItem.classList.remove('dragging', 'drag-over');
     });
 }
 
@@ -333,6 +553,29 @@ async function deleteTodo(e) {
         loadTodos();
     } catch (error) {
         console.error('Fehler beim Löschen des Todos:', error);
+    }
+}
+
+async function deleteCompletedTodos() {
+    const response = await fetch(API_URL);
+    const todos = await response.json();
+    const completedTodos = todos.filter(isTodoCompleted);
+    if (completedTodos.length === 0) return;
+
+    const confirmed = window.confirm(`Möchtest du wirklich ${completedTodos.length} erledigte Todos dauerhaft löschen?`);
+    if (!confirmed) return;
+
+    try {
+        const results = await Promise.all(
+            completedTodos.map(todo => fetch(`${API_URL}/${todo.id}`, { method: 'DELETE' }))
+        );
+        if (results.some(result => !result.ok)) {
+            throw new Error('Mindestens ein Todo konnte nicht gelöscht werden.');
+        }
+        loadTodos();
+    } catch (error) {
+        console.error('Fehler beim Löschen erledigter Todos:', error);
+        alert(error.message);
     }
 }
 
