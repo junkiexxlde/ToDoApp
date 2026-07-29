@@ -23,6 +23,7 @@ const deleteCompletedBtn = document.getElementById('delete-completed-btn');
 
 const expandedSubtaskTodoIds = new Set();
 let draggedTodoId = null;
+let draggedSubtask = null;
 let currentFilter = 'all';
 
 // Settings-Menü ein-/ausblenden
@@ -205,9 +206,7 @@ function updateProgress(todos) {
 }
 
 function isTodoCompleted(todo) {
-    const hasSubtasks = todo.subtasks && todo.subtasks.length > 0;
-    const allSubtasksCompleted = hasSubtasks && todo.subtasks.every(st => st.completed);
-    return todo.completed || allSubtasksCompleted;
+    return !!todo.completed;
 }
 
 function getFilteredTodos(todos) {
@@ -236,7 +235,6 @@ function renderTodos(todos) {
     filteredTodos.forEach(todo => {
         const todoItem = document.createElement('li');
         const hasSubtasks = todo.subtasks && todo.subtasks.length > 0;
-        const allSubtasksCompleted = hasSubtasks && todo.subtasks.every(st => st.completed);
         const isCompleted = isTodoCompleted(todo);
         const isSubtaskContainerVisible = expandedSubtaskTodoIds.has(todo.id);
 
@@ -285,7 +283,7 @@ function renderTodos(todos) {
             </div>
             <div id="${subtaskContainerId}" class="subtask-container ${isSubtaskContainerVisible ? 'visible' : ''}">
                 ${hasSubtasks ? todo.subtasks.map((subtask, index) => `
-                    <div class="subtask-item-in-todo" data-todo-id="${todo.id}" data-index="${index}">
+                    <div class="subtask-item-in-todo" draggable="true" data-todo-id="${todo.id}" data-index="${index}">
                         <input type="checkbox" class="subtask-toggle" ${subtask.completed ? 'checked' : ''} data-todo-id="${todo.id}" data-index="${index}">
                         <span class="subtask-text">${escapeHtml(subtask.text)}</span>
                     </div>
@@ -329,8 +327,18 @@ function renderTodos(todos) {
     document.querySelectorAll('.subtask-toggle-btn').forEach(button => {
         button.addEventListener('click', toggleSubtaskContainer);
     });
+    document.querySelectorAll('.subtask-item-in-todo').forEach(item => {
+        item.addEventListener('dragstart', handleSubtaskDragStart);
+        item.addEventListener('dragover', handleSubtaskDragOver);
+        item.addEventListener('dragleave', handleSubtaskDragLeave);
+        item.addEventListener('drop', handleSubtaskDrop);
+        item.addEventListener('dragend', handleSubtaskDragEnd);
+    });
     document.querySelectorAll('.subtask-toggle').forEach(checkbox => {
         checkbox.addEventListener('change', toggleSubtask);
+    });
+    document.querySelectorAll('.subtask-text').forEach(text => {
+        text.addEventListener('dblclick', startEditSubtaskText);
     });
     document.querySelectorAll('.add-subtask-btn').forEach(button => {
         button.addEventListener('click', addSubtask);
@@ -444,6 +452,94 @@ function handleTodoDragEnd() {
     });
 }
 
+function handleSubtaskDragStart(e) {
+    const item = e.currentTarget;
+    draggedSubtask = {
+        todoId: Number(item.dataset.todoId),
+        index: Number(item.dataset.index)
+    };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', `${draggedSubtask.todoId}:${draggedSubtask.index}`);
+    item.classList.add('dragging');
+}
+
+function handleSubtaskDragOver(e) {
+    e.preventDefault();
+    const item = e.currentTarget;
+    if (!draggedSubtask || Number(item.dataset.todoId) !== draggedSubtask.todoId) return;
+    if (Number(item.dataset.index) === draggedSubtask.index) return;
+    e.dataTransfer.dropEffect = 'move';
+    item.classList.add('drag-over');
+}
+
+function handleSubtaskDragLeave(e) {
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+        e.currentTarget.classList.remove('drag-over');
+    }
+}
+
+async function handleSubtaskDrop(e) {
+    e.preventDefault();
+    const targetItem = e.currentTarget;
+    const targetTodoId = Number(targetItem.dataset.todoId);
+    targetItem.classList.remove('drag-over');
+
+    if (!draggedSubtask || draggedSubtask.todoId !== targetTodoId) {
+        draggedSubtask = null;
+        return;
+    }
+
+    const subtaskContainer = targetItem.parentElement;
+    const subtaskItems = [...subtaskContainer.querySelectorAll('.subtask-item-in-todo')];
+    const draggedItem = subtaskItems.find(item => Number(item.dataset.index) === draggedSubtask.index);
+    if (!draggedItem) {
+        draggedSubtask = null;
+        return;
+    }
+
+    const targetRect = targetItem.getBoundingClientRect();
+    const insertBefore = e.clientY < targetRect.top + targetRect.height / 2;
+    const originalOrder = subtaskItems.map(item => Number(item.dataset.index));
+
+    if (insertBefore) {
+        subtaskContainer.insertBefore(draggedItem, targetItem);
+    } else {
+        subtaskContainer.insertBefore(draggedItem, targetItem.nextSibling);
+    }
+
+    const reorderedItems = [...subtaskContainer.querySelectorAll('.subtask-item-in-todo')];
+    reorderedItems.forEach((item, index) => {
+        item.dataset.index = index;
+    });
+
+    try {
+        const response = await fetch(`${API_URL}/${targetTodoId}`);
+        const todo = await response.json();
+        const newSubtasks = reorderedItems.map((item, index) => todo.subtasks[originalOrder[index]]);
+        const updateResponse = await fetch(`${API_URL}/${targetTodoId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subtasks: newSubtasks })
+        });
+
+        if (!updateResponse.ok) {
+            throw new Error('Fehler beim Speichern der Reihenfolge');
+        }
+    } catch (error) {
+        console.error('Fehler beim Sortieren der Teilschritte:', error);
+        loadTodos();
+    } finally {
+        draggedSubtask = null;
+    }
+}
+
+function handleSubtaskDragEnd() {
+    draggedSubtask = null;
+    document.querySelectorAll('.subtask-item-in-todo').forEach(item => {
+        item.classList.remove('dragging', 'drag-over');
+    });
+}
+
 // Teilschritte-Container ein-/ausblenden
 function toggleSubtaskContainer(e) {
     e.stopPropagation();
@@ -462,31 +558,98 @@ function toggleSubtaskContainer(e) {
     }
 }
 
+function startEditSubtaskText(e) {
+    const textElement = e.currentTarget;
+    if (textElement.classList.contains('editing')) return;
+
+    const subtaskItem = textElement.closest('.subtask-item-in-todo');
+    const todoId = subtaskItem.getAttribute('data-todo-id');
+    const index = parseInt(subtaskItem.getAttribute('data-index'), 10);
+    const currentText = textElement.textContent.trim();
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'subtask-edit-input';
+    input.value = currentText;
+    input.setAttribute('data-todo-id', todoId);
+    input.setAttribute('data-index', String(index));
+    input.addEventListener('keydown', saveEditedSubtaskText);
+    input.addEventListener('blur', () => {
+        const span = document.createElement('span');
+        span.className = 'subtask-text';
+        span.textContent = input.value.trim() || currentText;
+        span.addEventListener('dblclick', startEditSubtaskText);
+        input.replaceWith(span);
+    }, { once: true });
+
+    textElement.replaceWith(input);
+    textElement.classList.add('editing');
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function saveEditedSubtaskText(e) {
+    if (e.key !== 'Enter') return;
+
+    e.preventDefault();
+    const input = e.currentTarget;
+    const todoId = input.getAttribute('data-todo-id');
+    const index = parseInt(input.getAttribute('data-index'), 10);
+    const newText = input.value.trim();
+
+    if (!newText) {
+        input.focus();
+        return;
+    }
+
+    fetch(`${API_URL}/${todoId}`)
+        .then(response => response.json())
+        .then(todo => {
+            todo.subtasks[index].text = newText;
+            return fetch(`${API_URL}/${todoId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subtasks: todo.subtasks })
+            });
+        })
+        .then(response => {
+            if (!response.ok) throw new Error('Fehler beim Speichern des Teilschritts');
+            const span = document.createElement('span');
+            span.className = 'subtask-text';
+            span.textContent = newText;
+            span.addEventListener('dblclick', startEditSubtaskText);
+            input.replaceWith(span);
+        })
+        .catch(error => {
+            console.error('Fehler beim Bearbeiten des Teilschritts:', error);
+            input.value = input.value.trim() || 'Teilschritt';
+            input.focus();
+        });
+}
+
 // Teilschritt als erledigt/unerledigt markieren
 async function toggleSubtask(e) {
     e.stopPropagation();
-    const todoId = e.target.getAttribute('data-todo-id');
-    const index = parseInt(e.target.getAttribute('data-index'));
+    const checkbox = e.target;
+    const todoId = checkbox.getAttribute('data-todo-id');
+    const index = parseInt(checkbox.getAttribute('data-index'));
 
     try {
         const response = await fetch(`${API_URL}/${todoId}`);
         const todo = await response.json();
-        todo.subtasks[index].completed = e.target.checked;
+        todo.subtasks[index].completed = checkbox.checked;
 
-        // Prüfen, ob alle Subtasks erledigt sind
-        const allSubtasksCompleted = todo.subtasks.every(st => st.completed);
-        todo.completed = allSubtasksCompleted;
-
-        await fetch(`${API_URL}/${todoId}`, {
+        const updateResponse = await fetch(`${API_URL}/${todoId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                completed: todo.completed,
-                subtasks: todo.subtasks
-            })
+            body: JSON.stringify({ subtasks: todo.subtasks })
         });
-        loadTodos();
+
+        if (!updateResponse.ok) {
+            throw new Error('Fehler beim Speichern des Teilschritts');
+        }
     } catch (error) {
+        checkbox.checked = !checkbox.checked;
         console.error('Fehler beim Aktualisieren des Teilschritts:', error);
     }
 }

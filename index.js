@@ -466,16 +466,8 @@ app.put('/todos/:id', (req, res) => {
             });
         };
 
-        // Wenn Teilschritte aktualisiert wurden: erledigt-Status automatisch
-        // ableiten (nur erledigt, wenn es Teilschritte gibt und alle erledigt sind).
         if (subtasks !== undefined) {
-            const allSubtasksCompleted = subtasks.length > 0 && subtasks.every(st => st.completed);
-            db.run('UPDATE todos SET completed = ? WHERE id = ?', [allSubtasksCompleted ? 1 : 0, id], (err) => {
-                if (err) {
-                    console.error('Fehler beim Aktualisieren des Todo-Status:', err.message);
-                }
-                finishAndRespond();
-            });
+            finishAndRespond();
         } else {
             finishAndRespond();
         }
