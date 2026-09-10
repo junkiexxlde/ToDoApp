@@ -168,6 +168,7 @@ async function loadTodos() {
     try {
         const response = await fetch(API_URL);
         const todos = await response.json();
+        expandedSubtaskTodoIds.clear();
         renderTodos(todos);
     } catch (error) {
         console.error('Fehler beim Laden der Todos:', error);
@@ -209,10 +210,24 @@ function isTodoCompleted(todo) {
     return !!todo.completed;
 }
 
+function sortTodosByStatus(todos) {
+    return [...todos].sort((a, b) => {
+        const statusDifference = Number(isTodoCompleted(a)) - Number(isTodoCompleted(b));
+        if (statusDifference !== 0) return statusDifference;
+        return Number(b.id) - Number(a.id);
+    });
+}
+
 function getFilteredTodos(todos) {
-    if (currentFilter === 'open') return todos.filter(todo => !isTodoCompleted(todo));
-    if (currentFilter === 'completed') return todos.filter(isTodoCompleted);
-    return todos;
+    let filteredTodos = todos;
+
+    if (currentFilter === 'open') {
+        filteredTodos = todos.filter(todo => !isTodoCompleted(todo));
+    } else if (currentFilter === 'completed') {
+        filteredTodos = todos.filter(isTodoCompleted);
+    }
+
+    return sortTodosByStatus(filteredTodos);
 }
 
 // Todos rendern (mit Teilschritten direkt unter dem Todo)
