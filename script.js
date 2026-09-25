@@ -191,6 +191,7 @@ function formatFileSize(size) {
 function updateProgress(todos) {
     const total = todos.length;
     const completedCount = todos.filter(isTodoCompleted).length;
+    const subtasksCount = todos.filter(hasSubtasks).length;
     const percent = total === 0 ? 0 : Math.round((completedCount / total) * 100);
 
     const circumference = 169.6;
@@ -203,6 +204,7 @@ function updateProgress(todos) {
     document.getElementById('all-count').textContent = total;
     document.getElementById('open-count').textContent = total - completedCount;
     document.getElementById('completed-count').textContent = completedCount;
+    document.getElementById('subtasks-count').textContent = subtasksCount;
     deleteCompletedBtn.hidden = currentFilter !== 'completed' || completedCount === 0;
 }
 
@@ -210,10 +212,22 @@ function isTodoCompleted(todo) {
     return !!todo.completed;
 }
 
+function hasSubtasks(todo) {
+    return todo.subtasks && todo.subtasks.length > 0;
+}
+
 function sortTodosByStatus(todos) {
     return [...todos].sort((a, b) => {
         const statusDifference = Number(isTodoCompleted(a)) - Number(isTodoCompleted(b));
         if (statusDifference !== 0) return statusDifference;
+        
+        const aHasSubtasks = hasSubtasks(a);
+        const bHasSubtasks = hasSubtasks(b);
+        
+        if (aHasSubtasks !== bHasSubtasks) {
+            return aHasSubtasks ? -1 : 1;
+        }
+        
         return Number(b.id) - Number(a.id);
     });
 }
@@ -225,6 +239,8 @@ function getFilteredTodos(todos) {
         filteredTodos = todos.filter(todo => !isTodoCompleted(todo));
     } else if (currentFilter === 'completed') {
         filteredTodos = todos.filter(isTodoCompleted);
+    } else if (currentFilter === 'subtasks') {
+        filteredTodos = todos.filter(hasSubtasks);
     }
 
     return sortTodosByStatus(filteredTodos);
