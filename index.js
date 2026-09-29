@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4002;
 
 // Pfade relativ zum Skriptstandort (index.js liegt in /ToDoApp/)
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'todos.db');
